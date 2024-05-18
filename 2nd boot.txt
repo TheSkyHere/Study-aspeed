@@ -1,0 +1,56 @@
+1.SPEC中描述的一个功能就是：chip上电后WDT2开始计时，在22秒如果没有人清除0x1e78502c bit0 系统将重启从CS0切刀CS1（有待确认！！）
+    实际操作：在booting中会重新设置WDT2的时间（大致为5分钟，没有追uboot代码，内核代码，实际测试5分钟）随后等待FW启动
+    FW启动后会调用disable_watchdog.sh脚本清除0x1e78502c bit0
+    功能的开启需要对（hardware strap）0x1e6e2070 bit17做对应使能该功能才会开启
+2.AST2500 chip 一共有3个watchdog
+    每个watchdog到timeout后会重启BMC，重启的过程中可以重新选择boot code
+    对应的寄存器有
+        WTD1:
+            0x1e785000 Counter status 
+            0x1e785004 Counter reload value register
+            0x1e785008 Restart register
+            0x1e78500c bit7 bit0
+            0x1e785010 bit1
+            0x1e785014 Clear Timeout Status Register
+        WTD2:
+            0x1e785020 Counter status 当前的计数
+            0x1e785024 Counter reload value register 自动加载到 0x1e785020 Counter status
+            0x1e785028 Restart register 写0x4755到这个寄存器 0x1e785024的值将自动加载到0x1e785020中
+            0x1e78502c bit7：从哪个boot code启动 bit0开始计时
+            0x1e785030 bit1：当前在哪块 boot code上启动的 0：master 1：slave
+            0x1e785034 Clear Timeout Status Register
+        WTD3:
+            0x1e785040 Counter status
+            0x1e785044 Counter reload value register
+            0x1e785048 Restart register
+            0x1e78504c bit7 bit0
+            0x1e785050 bit1
+            0x1e785054 Clear Timeout Status Register
+3.关于2nd boot 
+    flash0   对应的是mtd4：当前启动的boot code
+    flash0ro 对应的是mtd9：另一块boot code
+
+4.疑点
+    在master flash上对devmem 0x1e78502c 32 0x000000b3  切到slave
+    在slave  flash上对devmem 0x1e78502c 32 0x000000b3  切到master
+    rootcase: SPEC: 0x1e785030 bit1：Firmware must clear this bit value to ’0’ after jump to the physical flash address.
+        必须切换的时候需要对 devmem 0x1e785034 w 0x01
+
+uboot中关闭wdt2 控制dual flash功能：
++++ b/arch/arm/mach-aspeed/ast2600/board_common.c
+@@ -59,6 +59,9 @@ __weak int board_init(void)
+ 	u64 rev_id;
+ 	u32 tmp_val;
+ 
++	//temp workaround
++	writel(0x0, 0x1e620064);
+
+
+RST: Power On 
+FMC 2nd Boot (ABR): Enable, Dual flashes, Source: Primary
+eSPI Mode: SIO:Enable : SuperIO-2e
+
+
+
+
+
